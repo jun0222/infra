@@ -1,0 +1,77 @@
+# hatena blogよりblog entryを取得する
+name: Sync Blog and Build
+
+on:
+  schedule:
+    # 毎日午前9時（UTC/日本時間18時）に実行
+    - cron: '0 9 * * *'
+    # 毎日午後9時（UTC/日本時間朝6時）に実行
+    - cron: '0 21 * * *'
+  workflow_dispatch: # 手動実行可能
+
+permissions:
+  contents: write
+  # pages: write      # Vercel使用のため不要
+  # id-token: write   # Vercel使用のため不要
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Setup blogsync
+      run: |
+        wget https://github.com/x-motemen/blogsync/releases/download/v0.20.1/blogsync_v0.20.1_linux_amd64.tar.gz
+        tar -xzf blogsync_v0.20.1_linux_amd64.tar.gz
+        sudo mv blogsync_v0.20.1_linux_amd64/blogsync /usr/local/bin/
+        
+    - name: Create blogsync config
+      run: |
+        echo "${{ secrets.BSY }}" > blogsync.yaml
+        
+    - name: Pull blog entries
+      run: |
+        # 削除された記事を反映するため、entriesディレクトリをクリア
+        rm -rf entries/
+        blogsync pull ${{ secrets.DOMAIN }}
+        
+    - name: Commit changes if any
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        # -A で削除されたファイルも追跡
+        git add -A entries/
+
+        if git diff --cached --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Auto-sync blog entries"
+          git push
+        fi
+        
+    - name: Build site
+      run: npm run build
+
+    # GitHub Pagesへのデプロイは無効化（Vercel使用のため）
+    # - name: Setup Pages
+    #   uses: actions/configure-pages@v4
+    #
+    # - name: Upload artifact
+    #   uses: actions/upload-pages-artifact@v3
+    #   with:
+    #     path: './docs'
+    #
+    # - name: Deploy to GitHub Pages
+    #   uses: actions/deploy-pages@v4

@@ -1,0 +1,76 @@
+# blogsync-and-buildで取得したblog entryをvercelにデプロイする
+name: Deploy to Vercel
+
+on:
+  push:
+    branches: [ master ]
+  schedule:
+    # 毎日午前9時（UTC/日本時間18時）に実行
+    - cron: '0 9 * * *'
+    # 毎日午後9時（UTC/日本時間朝6時）に実行
+    - cron: '0 21 * * *'
+  workflow_dispatch: # 手動実行可能
+
+permissions:
+  contents: write
+
+jobs:
+  sync-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Setup blogsync
+      run: |
+        wget https://github.com/x-motemen/blogsync/releases/download/v0.20.1/blogsync_v0.20.1_linux_amd64.tar.gz
+        tar -xzf blogsync_v0.20.1_linux_amd64.tar.gz
+        sudo mv blogsync_v0.20.1_linux_amd64/blogsync /usr/local/bin/
+        
+    - name: Create blogsync config
+      run: |
+        echo "${{ secrets.BSY }}" > blogsync.yaml
+        
+    - name: Pull blog entries
+      run: |
+        # 削除された記事を反映するため、entriesディレクトリをクリア
+        rm -rf entries/
+        blogsync pull ${{ secrets.DOMAIN }}
+        
+    - name: Commit changes if any
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        # -A で削除されたファイルも追跡
+        git add -A entries/
+        if git diff --cached --quiet; then
+          echo "No new entries to commit"
+        else
+          git commit -m "Auto-sync blog entries $(date '+%Y-%m-%d %H:%M:%S')"
+          git push
+        fi
+        
+    - name: Build site
+      run: npm run build
+      
+    - name: Deploy to Vercel
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        working-directory: ./
+        vercel-args: '--prod'
